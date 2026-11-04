@@ -16,7 +16,7 @@ async function api(path='',method='GET',body){
  const r=await fetch('https://sheets.googleapis.com/v4/spreadsheets/'+encodeURIComponent(CONFIG.spreadsheetId)+path,{method,headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});
  const j=await r.json();if(r.status===401){token='';expires=0;try{GoogleSession.clear(sessionStorage);}catch{}throw Error('Google connection expired or was revoked. Click Connect Google.');}if(!r.ok)throw Error(j.error?.message||'Google request failed');return j;
 }
-async function run(fn){if(busy)return;busy=true;document.querySelectorAll('button').forEach(b=>b.disabled=true);try{await fn();}catch(e){status(e.message+' Your form has been kept. Refresh before retrying an uncertain save.');}finally{busy=false;document.querySelectorAll('button').forEach(b=>b.disabled=false);}}
+async function run(fn){if(busy)return;busy=true;document.querySelectorAll('button:not(#closeSearch)').forEach(b=>b.disabled=true);try{await fn();}catch(e){status(e.message+' Your form has been kept. Refresh before retrying an uncertain save.');}finally{busy=false;document.querySelectorAll('button').forEach(b=>b.disabled=false);}}
 async function initialise(){
  const meta=await api('?fields=sheets.properties');const titles=meta.sheets.map(s=>s.properties.title);
  const missing=Object.keys(C.schema).filter(t=>!titles.includes(t));
@@ -120,7 +120,7 @@ $('onlineSearch').onsubmit=e=>{e.preventDefault();run(async()=>{
  });};
 document.addEventListener('click',e=>{const b=e.target.closest('[data-online-index]');if(!b||busy)return;onlineSelected=onlineResults[Number(b.dataset.onlineIndex)];const f=onlineSelected;$('onlineName').textContent=f.brand+' — '+f.name;$('onlineSource').textContent=f.source+' · '+f.checked;
  $('onlineUnit').innerHTML=f.basis==='serving'?'<option value="servings">Listed menu portions</option>':'<option value="g">Grams</option>'+(f.servingGrams?`<option value="servings">Servings (${esc(f.servingLabel)})</option>`:'');
- if(f.servingGrams)$('onlineUnit').value='servings';$('onlinePortion').elements.amount.value=f.basis==='100g'&&!f.servingGrams?100:1;$('onlinePortion').hidden=false;$('logForm').hidden=true;onlinePreview();$('onlinePortion').scrollIntoView({behavior:'smooth'});
+ if(f.servingGrams)$('onlineUnit').value='servings';$('onlinePortion').elements.amount.value=f.basis==='100g'&&!f.servingGrams?100:1;$('onlinePortion').hidden=false;$('logForm').hidden=true;onlinePreview();if($('searchDialog').open)$('searchDialog').close();document.querySelector('[data-tab="today"]').click();$('onlinePortion').scrollIntoView({behavior:'smooth'});$('onlinePortion').elements.amount.focus({preventScroll:true});
 });
 form('onlinePortion',async v=>{
  if(!onlineSelected)throw Error('Choose a search result first.');
@@ -142,3 +142,17 @@ form('onlinePortion',async v=>{
 })();
 
 $('useSaved').onclick=()=>{$('onlinePortion').hidden=true;$('logForm').hidden=false;};
+
+// Native dialog provides focus containment and Escape-to-close.
+function openFoodSearch(){
+ const dialog=$('searchDialog');if(!dialog.open)dialog.showModal();
+ $('onlineSearch').elements.query.focus();
+}
+$('floatingSearch').onclick=openFoodSearch;
+$('openSearchInline').onclick=openFoodSearch;
+$('closeSearch').onclick=()=>$('searchDialog').close();
+$('searchDialog').addEventListener('click',e=>{
+ if(e.target!==e.currentTarget)return;
+ const r=e.currentTarget.getBoundingClientRect();
+ if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)e.currentTarget.close();
+});
