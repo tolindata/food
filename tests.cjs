@@ -1,0 +1,14 @@
+const assert=require('node:assert/strict');
+const C=require('./core.js');
+const food={basis:'100g',kcal:130,protein_g:2,carbs_g:28,fat_g:.3};
+assert.equal(C.nutrition(food,180).kcal,234);
+assert.equal(C.nutrition({...food,basis:'serving'},.5).kcal,65);
+assert.equal(C.totals([{kcal:234},{kcal:'100',protein_g:5}]).kcal,334);
+assert.equal(C.previous('2026-03-01'),'2026-02-28');
+assert.equal(C.previous('2024-03-01'),'2024-02-29');
+assert.equal(C.average([{date:'2026-11-01',weight_kg:80},{date:'2026-11-04',weight_kg:78},{date:'2026-10-28',weight_kg:100}], '2026-11-04'),79);
+assert.equal(C.average([], '2026-11-04'),null);
+const snapshot=C.nutrition(food,180);food.kcal=900;assert.equal(snapshot.kcal,234);
+assert.equal(C.schema.Diary.length,12);
+assert.match(C.day('Australia/Sydney'),/^\d{4}-\d{2}-\d{2}$/);
+console.log('All 10 calculation/schema checks passed.');
