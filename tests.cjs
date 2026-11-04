@@ -12,3 +12,17 @@ const snapshot=C.nutrition(food,180);food.kcal=900;assert.equal(snapshot.kcal,23
 assert.equal(C.schema.Diary.length,12);
 assert.match(C.day('Australia/Sydney'),/^\d{4}-\d{2}-\d{2}$/);
 console.log('All 10 calculation/schema checks passed.');
+const O=require('./online.js');
+const p={code:'123',product_name:'Example',brands:'Brand',nutriments:{'energy-kcal_100g':200,proteins_100g:10,carbohydrates_100g:20,fat_100g:5},serving_quantity:40,serving_size:'40 g'};
+let f=O.normalise(p);assert.equal(O.portion(f,2,'servings').kcal,160);assert.equal(O.portion(f,180,'g').kcal,360);
+assert.equal(O.normalise({...p,nutriments:{}}),null);
+assert.equal(O.normalise({...p,nutrition_data_per:'100ml'}),null);
+assert.equal(O.normalise({...p,nutriments:{'energy-kcal_100g':0}}).kcal,0);
+assert.equal(O.normalise({...p,nutriments:{'energy-kcal_100g':100}}).protein_g,null);
+assert.equal(O.portion(O.normalise({...p,nutriments:{'energy-kcal_100g':100}}),100,'g').protein_g,null);
+assert.equal(C.nutrition({basis:'100g',kcal:100,protein_g:''},150).protein_g,'');
+assert(Math.abs(O.normalise({...p,nutriments:{energy_100g:418.4,energy_unit:'kJ'}}).kcal-100)<1e-9);
+assert(O.matches(O.restaurant[0],'Sushi Hub prawn nigiri'));
+assert(Math.abs(O.portion(O.restaurant[0],2,'servings').kcal-140.535)<.01);
+assert.equal(O.normalise({...p,serving_size:'250 ml',serving_quantity:250}).servingGrams,null);
+console.log('Online search: all 12 normalisation/portion checks passed.');

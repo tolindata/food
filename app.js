@@ -44,7 +44,8 @@ function render(){
  const s=settings(),target=Number(s.daily_kcal_target||0),rows=data.Diary.filter(r=>r.date===$('date').value),t=C.totals(rows);
  $('summary').innerHTML=[['Eaten',num(t.kcal)+' kcal'],[target&&t.kcal>target?'Over target':'Remaining',target?num(Math.abs(target-t.kcal))+' kcal':'Set a target'],['Protein',num(t.protein_g)+' g'],['Carbs / fat',num(t.carbs_g)+' / '+num(t.fat_g)+' g']].map(([a,b])=>`<div class="card"><span>${a}</span><strong>${b}</strong></div>`).join('');
  $('progress').value=target?Math.min(100,t.kcal/target*100):0;
- $('diary').innerHTML=rows.length?rows.map(r=>`<article class="entry"><div><strong>${esc(r.food_name)}</strong><p>${esc(r.meal)} · ${esc(r.quantity)} ${esc(r.unit)} · ${num(r.kcal)} kcal</p><small>${r.unit==='quick'?'Macros unknown':`P ${num(r.protein_g)} · C ${num(r.carbs_g)} · F ${num(r.fat_g)} g`}</small></div><div class="actions"><button data-action="editDiary" data-id="${esc(r.id)}">Edit</button><button data-action="deleteDiary" data-id="${esc(r.id)}" class="secondary">Delete</button></div></article>`).join(''):'<p>No food logged for this date.</p>';
+ $('diary').innerHTML=rows.length?rows.map(r=>`<article class="entry"><div><strong>${esc(r.food_name)}</strong><p>${esc(r.meal)} · ${esc(r.quantity)} ${esc(r.unit)} · ${num(r.kcal)} kcal</p><small>${r.unit==='quick'?'Macros unknown':`P ${r.protein_g===''?'unknown':num(r.protein_g)} · C ${r.carbs_g===''?'unknown':num(r.carbs_g)} · F ${r.fat_g===''?'unknown':num(r.fat_g)} g`}</small></div><div class="actions"><button data-action="editDiary" data-id="${esc(r.id)}">Edit</button><button data-action="deleteDiary" data-id="${esc(r.id)}" class="secondary">Delete</button></div></article>`).join(''):'<p>No food logged for this date.</p>';
+ if(rows.some(r=>r.unit==='quick'||['protein_g','carbs_g','fat_g'].some(k=>r[k]===''))) $('summary').insertAdjacentHTML('beforeend','<small>Macro totals include known values only; some entries have unknown macros.</small>');
  renderOptions();
  $('foodList').innerHTML=data.Foods.map(f=>`<article class="entry"><div><strong>${f.favourite==='true'?'★ ':''}${esc(f.name)}</strong><p>${esc(f.brand)} · ${num(f.kcal)} kcal / ${esc(f.basis)}</p></div><div class="actions"><button data-action="editFood" data-id="${esc(f.id)}">Edit</button><button data-action="deleteFood" data-id="${esc(f.id)}" class="secondary">Delete</button></div></article>`).join('')||'<p>Add your first food using a nutrition label.</p>';
  const weights=[...data.Weight].sort((a,b)=>a.date.localeCompare(b.date));const latest=weights.at(-1),avg=latest?C.average(weights,latest.date):null;
@@ -82,8 +83,46 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-action]');
  if(action.startsWith('delete')){const name={deleteDiary:'Diary',deleteFood:'Foods',deleteWeight:'Weight'}[action];if(confirm('Delete this entry?'))run(()=>remove(name,id));}
  if(action==='editFood'){const f=data.Foods.find(r=>r.id===id);for(const k of C.schema.Foods){const el=$('foodForm').elements[k];if(el)el.type==='checkbox'?el.checked=f[k]==='true':el.value=f[k];}$('foodForm').scrollIntoView({behavior:'smooth'});}
  if(action==='editWeight'){const r=data.Weight.find(r=>r.id===id);for(const k of ['date','weight_kg','notes'])$('weightForm').elements[k].value=r[k];$('weightForm').scrollIntoView({behavior:'smooth'});}
- if(action==='editDiary'){const r=data.Diary.find(r=>r.id===id);const amount=prompt(r.unit==='quick'?'New calories':'New amount ('+r.unit+')',r.unit==='quick'?r.kcal:r.quantity);if(amount===null)return;const n=Number(amount);if(!Number.isFinite(n)||n<=0){status('Enter a positive number.');return;}const updated={...r};if(r.unit==='quick')updated.kcal=n;else{const ratio=n/Number(r.quantity);updated.quantity=n;C.nutrients.forEach(k=>updated[k]=Number(r[k]||0)*ratio);}run(()=>write('Diary',updated));}
+ if(action==='editDiary'){const r=data.Diary.find(r=>r.id===id);const amount=prompt(r.unit==='quick'?'New calories':'New amount ('+r.unit+')',r.unit==='quick'?r.kcal:r.quantity);if(amount===null)return;const n=Number(amount);if(!Number.isFinite(n)||n<=0){status('Enter a positive number.');return;}const updated={...r};if(r.unit==='quick')updated.kcal=n;else{const ratio=n/Number(r.quantity);updated.quantity=n;C.nutrients.forEach(k=>updated[k]=r[k]===''?'':Number(r[k])*ratio);}run(()=>write('Diary',updated));}
 });
 $('export').onclick=()=>run(async()=>{await load();const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='daily-plate-backup-'+C.day()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
 $('disconnect').onclick=()=>{if(token&&window.google)google.accounts.oauth2.revoke(token,()=>{});token='';expires=0;data={Foods:[],Diary:[],Weight:[],Settings:[]};render();status('Disconnected. Data remains in your spreadsheet.');};
 render();document.querySelector('[data-tab="today"]').setAttribute('aria-current','page');
+
+// Online database lookup: explicit searches only, with cache and request spacing.
+let onlineResults=[],onlineSelected=null,lastSearch=0;
+const searchCache=new Map();
+const known=v=>v===null||v===''||v===undefined?'unknown':Number(v).toFixed(1);
+function onlinePreview(){if(!onlineSelected)return;const f=$('onlinePortion').elements,t=Online.portion(onlineSelected,f.amount.value,f.unit.value);$('onlineEstimate').textContent=`${known(t.kcal)} kcal · Protein ${known(t.protein_g)} g · Carbs ${known(t.carbs_g)} g · Fat ${known(t.fat_g)} g`;}
+$('onlinePortion').elements.amount.oninput=onlinePreview;$('onlineUnit').onchange=onlinePreview;
+$('onlineSearch').onsubmit=e=>{e.preventDefault();run(async()=>{
+ const q=new FormData(e.target).get('query').trim();if(q.length<2)return;
+ $('onlinePortion').hidden=true;onlineSelected=null;
+ const local=Online.restaurant.filter(f=>Online.matches(f,q));
+ let remote=searchCache.get(q.toLowerCase())||[],warning='';
+ if(!searchCache.has(q.toLowerCase())){
+  if(Date.now()-lastSearch<6500){warning='Please wait a few seconds between database searches.';}
+  else{
+   lastSearch=Date.now();$('onlineStatus').textContent='Searching Open Food Facts…';
+   const params=new URLSearchParams({search_terms:q,search_simple:'1',action:'process',json:'1',page_size:'20',fields:'code,product_name,brands,nutriments,serving_size,serving_quantity,nutrition_data_per',app_name:'DailyPlate'});
+   try{const r=await fetch('https://world.openfoodfacts.org/cgi/search.pl?'+params,{signal:AbortSignal.timeout(20000)});if(!r.ok)throw Error('HTTP '+r.status);const j=await r.json();if(!Array.isArray(j.products))throw Error('Unexpected database response');remote=j.products.map(Online.normalise).filter(Boolean);searchCache.set(q.toLowerCase(),remote);}
+   catch(err){warning='Online database unavailable ('+err.message+'). Try again later; saved foods still work.';}
+  }
+ }
+ onlineResults=[...local,...remote];
+ $('onlineStatus').textContent=(warning?warning+' ':'')+(onlineResults.length?onlineResults.length+' results. Check brand, flavour and portion.':'No usable result. Try fewer words or add a food manually. Foods without calorie data and per-100-ml records are excluded.');
+ $('onlineResults').innerHTML=onlineResults.map((f,i)=>`<article class="entry"><div><strong>${esc(f.brand)} — ${esc(f.name)}</strong><p>${known(f.kcal)} kcal / ${f.basis==='100g'?'100 g':esc(f.servingLabel)}</p><small>${esc(f.source)} · ${esc(f.checked)}</small><small>P ${known(f.protein_g)} · C ${known(f.carbs_g)} · F ${known(f.fat_g)} g</small><a href="${esc(f.url)}" target="_blank" rel="noopener">View source</a></div><button type="button" data-online-index="${i}">Choose</button></article>`).join('');
+ });};
+document.addEventListener('click',e=>{const b=e.target.closest('[data-online-index]');if(!b||busy)return;onlineSelected=onlineResults[Number(b.dataset.onlineIndex)];const f=onlineSelected;$('onlineName').textContent=f.brand+' — '+f.name;$('onlineSource').textContent=f.source+' · '+f.checked;
+ $('onlineUnit').innerHTML=f.basis==='serving'?'<option value="servings">Listed menu portions</option>':'<option value="g">Grams</option>'+(f.servingGrams?`<option value="servings">Servings (${esc(f.servingLabel)})</option>`:'');
+ if(f.servingGrams)$('onlineUnit').value='servings';$('onlinePortion').elements.amount.value=f.basis==='100g'&&!f.servingGrams?100:1;$('onlinePortion').hidden=false;onlinePreview();$('onlinePortion').scrollIntoView({behavior:'smooth'});
+});
+form('onlinePortion',async v=>{
+ if(!onlineSelected)throw Error('Choose a search result first.');
+ const f=onlineSelected,serving=v.unit==='servings',snapshot=Online.portion(f,v.amount,v.unit);
+ const name=f.name+(f.basis==='serving'?' — '+f.servingLabel:f.servingGrams?' — serving '+f.servingLabel:'');
+ // Preserve provenance inside the existing brand cell without changing the sheet schema.
+ await write('Foods',{...f,name,brand:f.brand+' | '+f.source+' | '+f.url+' | '+f.checked,favourite:'false',...Object.fromEntries(C.nutrients.map(k=>[k,f[k]??'']))});
+ await saveLog({date:$('date').value,meal:v.meal,food_id:f.id,food_name:(f.brand?f.brand+' — ':'')+name,quantity:f.basis==='100g'&&serving?Number(v.amount)*f.servingGrams:Number(v.amount),unit:f.basis==='100g'?'g':'servings',...Object.fromEntries(C.nutrients.map(k=>[k,snapshot[k]??'']))});
+ status('Online food saved and logged. Calories and available macros calculated automatically.');
+});
